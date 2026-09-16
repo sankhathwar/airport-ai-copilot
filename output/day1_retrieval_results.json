@@ -1,0 +1,55 @@
+[
+  {
+    "question": "What is the maximum surge allowed at SFO?",
+    "retrieved_sources": [
+      "sfo_pricing.md"
+    ],
+    "top_chunks": [
+      "The maximum permitted surge multiplier at SFO is 1.5x. The surge multiplier must never exceed 1.5x. Any proposed multiplier above 1.5x is considered a policy violation."
+    ]
+  },
+  {
+    "question": "Can an SFO driver abandon the airport queue?",
+    "retrieved_sources": [
+      "sfo_driver_policy.md",
+      "jfk_operations.md",
+      "sfo_operations.md"
+    ],
+    "top_chunks": [
+      "SFO drivers may leave the airport queue voluntarily, but they lose their queue position. Drivers cannot intentionally bypass the airport queue."
+    ]
+  },
+  {
+    "question": "What is the maximum surge allowed at JFK?",
+    "retrieved_sources": [
+      "jfk_pricing.md",
+      "sfo_pricing.md"
+    ],
+    "top_chunks": [
+      "The maximum permitted surge multiplier at JFK is 1.6x. Any surge multiplier above 1.6x is prohibited."
+    ]
+  },
+  {
+    "question": "What happens when a driver cancels at LAX?",
+    "retrieved_sources": [
+      "sfo_driver_policy.md",
+      "lax_operations.md",
+      "sfo_operations.md"
+    ],
+    "top_chunks": [
+      "The LAX operations policy discusses investigating sustained driver cancellations by examining queue conditions, pickup conditions, expected earnings, waiting time, and airport congestion."
+    ],
+    "note": "The retrieved LAX policy did not specify a particular cancellation penalty, so no penalty was inferred."
+  },
+  {
+    "question": "Does increasing surge require approval?",
+    "retrieved_sources": [
+      "sfo_pricing.md",
+      "jfk_pricing.md",
+      "lax_pricing.md"
+    ],
+    "top_chunks": [
+      "Increasing surge requires operational justification and human approval. Surge increases must also be validated against the applicable airport maximum multiplier before execution."
+    ]
+  }
+]
