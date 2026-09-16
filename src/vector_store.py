@@ -42,3 +42,24 @@ def create_vector_store(chunks, embeddings):
     )
 
     return collection
+
+def retrieve_documents(
+    collection,
+    query: str,
+    embedding_model,
+    top_k: int = 3
+):
+    """
+    Retrieve the most relevant policy chunks for a user query.
+    """
+
+    query_embedding = embedding_model.encode(
+        [query]
+    )[0]
+
+    results = collection.query(
+        query_embeddings=[query_embedding.tolist()],
+        n_results=top_k
+    )
+
+    return results
