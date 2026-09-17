@@ -4,6 +4,11 @@ from src.data_preprocessing import load_airport_metrics
 
 from pathlib import Path
 
+from src.guardrails import (
+    validate_action_input,
+    validate_tool_output,
+)
+
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 DATA_PATH = PROJECT_ROOT / "data" / "airport_metrics.csv"
 
@@ -263,16 +268,7 @@ TOOL_REGISTRY = {
 }
 
 def execute_tool(tool_name: str, arguments: dict) -> dict:
-    """
-    Execute a registered tool using structured arguments.
-    """
-
-    # Check tool name
-    if not tool_name:
-        return {
-            "status": "error",
-            "message": "tool_name is required."
-        }
+    """Execute a registered tool after input and output validation."""
 
     if tool_name not in TOOL_REGISTRY:
         return {
@@ -280,43 +276,52 @@ def execute_tool(tool_name: str, arguments: dict) -> dict:
             "message": f"Unknown tool: {tool_name}"
         }
 
-    # Check arguments
-    if arguments is None:
+    # ---------------------------------------------
+    # INPUT GUARDRAIL
+    # ---------------------------------------------
+    validation = validate_action_input(
+        action=tool_name,
+        arguments=arguments
+    )
+
+    if not validation["valid"]:
         return {
-            "status": "error",
-            "message": "Tool arguments are required."
+            "status": "blocked",
+            "stage": "input_guardrail",
+            "tool": tool_name,
+            "message": validation["message"]
         }
 
-    if not isinstance(arguments, dict):
-        return {
-            "status": "error",
-            "message": "Tool arguments must be provided as a dictionary."
-        }
-
-    tool = TOOL_REGISTRY[tool_name]
-
-    function = tool["function"]
+    validated_arguments = validation["arguments"]
 
     try:
-        result = function(**arguments)
+        # ---------------------------------------------
+        # TOOL EXECUTION
+        # ---------------------------------------------
+        result = TOOL_REGISTRY[tool_name]["function"](**validated_arguments)
 
-        # Validate unexpected tool response
-        if not isinstance(result, dict):
+        # ---------------------------------------------
+        # OUTPUT GUARDRAIL
+        # ---------------------------------------------
+        output_validation = validate_tool_output(
+            action=tool_name,
+            result=result
+        )
+
+        if not output_validation["valid"]:
             return {
-                "status": "error",
-                "message": "Tool returned an unexpected response."
+                "status": "blocked",
+                "stage": "output_guardrail",
+                "tool": tool_name,
+                "message": output_validation["message"]
             }
 
         return result
 
-    except TypeError as e:
-        return {
-            "status": "error",
-            "message": f"Invalid tool arguments: {str(e)}"
-        }
-
     except Exception as e:
         return {
             "status": "error",
+            "stage": "tool_execution",
+            "tool": tool_name,
             "message": f"Tool execution failed: {str(e)}"
         }
