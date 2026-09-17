@@ -6,3 +6,4 @@ chromadb
 google-genai
 python-dotenv
 notebook
+streamlit

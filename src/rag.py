@@ -13,7 +13,7 @@ Prompt Construction
     ↓
 Gemini
     ↓
-Grounded Response
+Grounded Response + Retrieved Sources
 """
 
 import os
@@ -21,10 +21,21 @@ import os
 from dotenv import load_dotenv
 from google import genai
 
-from src.embeddings import load_embedding_model
-from src.prompts import RAG_SYSTEM_PROMPT, RAG_USER_PROMPT
+from src.prompts import (
+    RAG_SYSTEM_PROMPT,
+    RAG_USER_PROMPT,
+)
 from src.vector_store import retrieve_documents
 
+import os
+
+SYSTEM_CA = "/etc/ssl/certs/ca-certificates.crt"
+
+os.environ["REQUESTS_CA_BUNDLE"] = SYSTEM_CA
+os.environ["SSL_CERT_FILE"] = SYSTEM_CA
+os.environ["CURL_CA_BUNDLE"] = SYSTEM_CA
+
+print("Using certificate bundle:", SYSTEM_CA)
 
 load_dotenv()
 
@@ -41,36 +52,40 @@ def create_rag_answer(
     """
     Retrieve relevant policy chunks and generate a
     grounded answer using Gemini.
+
+    Returns a consistent dictionary containing:
+    - answer
+    - retrieved_documents
     """
 
     # ----------------------------------------
-    # 1. Validate the user query
+    # 1. Validate user query
     # ----------------------------------------
 
     if not query or not query.strip():
 
-        return (
-            "Answer:\n"
-            "I didn't receive a question. Please ask me about "
-            "airport operations, policies, queues, pricing, "
-            "cancellations, or approvals.\n\n"
-            "Sources:\n"
-            "- No applicable policy source found"
-        )
+        return {
+            "answer": (
+                "I didn't receive a question. Please ask me "
+                "about airport operations, policies, queues, "
+                "pricing, cancellations, or approvals."
+            ),
+            "retrieved_documents": []
+        }
 
     query = query.strip()
 
     # ----------------------------------------
-    # Conversation history
+    # 2. Conversation history
     # ----------------------------------------
 
     if memory is not None:
         conversation_history = memory.format_history()
     else:
-        conversation_history = "No previous conversation."   
+        conversation_history = "No previous conversation."
 
     # ----------------------------------------
-    # 2. Retrieve relevant documents
+    # 3. Retrieve policy documents
     # ----------------------------------------
 
     try:
@@ -84,45 +99,69 @@ def create_rag_answer(
 
     except Exception:
 
-        return (
-            "Answer:\n"
-            "I couldn't retrieve the relevant airport policy "
-            "information right now. I don't want to guess or "
-            "give you an unsupported answer. Please try the "
-            "question again, or ask about another airport "
-            "operations policy.\n\n"
-            "Sources:\n"
-            "- No applicable policy source found"
-        )
+        return {
+            "answer": (
+                "I couldn't retrieve the relevant airport "
+                "policy information right now. I don't want "
+                "to guess or provide unsupported information."
+            ),
+            "retrieved_documents": []
+        }
 
     # ----------------------------------------
-    # 3. Check whether retrieval returned data
+    # 4. Extract retrieved documents
     # ----------------------------------------
 
-    documents = results.get("documents", [[]])[0]
-    metadatas = results.get("metadatas", [[]])[0]
+    documents = results.get(
+        "documents",
+        [[]]
+    )[0]
+
+    metadatas = results.get(
+        "metadatas",
+        [[]]
+    )[0]
+
+    distances = results.get(
+        "distances",
+        [[]]
+    )[0]
+
+    # ----------------------------------------
+    # 5. Check retrieval result
+    # ----------------------------------------
 
     if not documents:
 
-        return (
-            "Answer:\n"
-            "I couldn't find a relevant policy in the current "
-            "airport knowledge base. I don't want to make up "
-            "an answer without supporting policy information.\n\n"
-            "I can help with airport operations, driver queues, "
-            "pickup and drop-off rules, surge pricing, "
-            "cancellations, incentives, and operational approvals.\n\n"
-            "Sources:\n"
-            "- No applicable policy source found"
+        return {
+            "answer": (
+                "I couldn't find a relevant policy in the "
+                "current airport knowledge base. I don't want "
+                "to make up an answer without supporting "
+                "policy information."
+            ),
+            "retrieved_documents": []
+        }
+
+    # ----------------------------------------
+    # 6. Build structured retrieved documents
+    # ----------------------------------------
+
+    retrieved_documents = []
+
+    for index, document in enumerate(documents):
+
+        metadata = (
+            metadatas[index]
+            if index < len(metadatas)
+            else {}
         )
 
-    # ----------------------------------------
-    # 4. Build policy context
-    # ----------------------------------------
-
-    context_parts = []
-
-    for document, metadata in zip(documents, metadatas):
+        distance = (
+            distances[index]
+            if index < len(distances)
+            else None
+        )
 
         source = metadata.get(
             "source",
@@ -134,16 +173,35 @@ def create_rag_answer(
             "Unknown airport"
         )
 
-        context_parts.append(
-            f"Source: {source}\n"
-            f"Airport: {airport}\n"
-            f"Policy:\n{document}"
+        retrieved_documents.append(
+            {
+                "source": source,
+                "airport": airport,
+                "content": document,
+                "distance": distance
+            }
         )
 
-    context = "\n\n---\n\n".join(context_parts)
+    # ----------------------------------------
+    # 7. Build policy context for Gemini
+    # ----------------------------------------
+
+    context_parts = []
+
+    for document in retrieved_documents:
+
+        context_parts.append(
+            f"Source: {document['source']}\n"
+            f"Airport: {document['airport']}\n"
+            f"Policy:\n{document['content']}"
+        )
+
+    context = "\n\n---\n\n".join(
+        context_parts
+    )
 
     # ----------------------------------------
-    # 5. Construct the Gemini prompt
+    # 8. Construct Gemini prompts
     # ----------------------------------------
 
     system_prompt = RAG_SYSTEM_PROMPT.format(
@@ -162,25 +220,28 @@ def create_rag_answer(
     )
 
     # ----------------------------------------
-    # 6. Check Gemini API key
+    # 9. Check Gemini API key
     # ----------------------------------------
 
-    api_key = os.getenv("GEMINI_API_KEY")
+    api_key = os.getenv(
+        "GEMINI_API_KEY"
+    )
 
     if not api_key:
 
-        return (
-            "Answer:\n"
-            "I retrieved the relevant airport policy, but "
-            "the response service is not configured right now. "
-            "I can't safely generate the final answer without "
-            "the required service configuration.\n\n"
-            "Sources:\n"
-            "- Policy information was retrieved successfully"
-        )
+        return {
+            "answer": (
+                "I retrieved the relevant airport policy, "
+                "but the response service is not configured "
+                "right now. I can't safely generate the final "
+                "answer without the required service "
+                "configuration."
+            ),
+            "retrieved_documents": retrieved_documents
+        }
 
     # ----------------------------------------
-    # 7. Call Gemini
+    # 10. Call Gemini
     # ----------------------------------------
 
     try:
@@ -196,34 +257,46 @@ def create_rag_answer(
 
         if not response or not response.text:
 
-            return (
-                "Answer:\n"
-                "I retrieved the relevant policy information, "
-                "but I wasn't able to generate a response right "
-                "now. Please try the question again.\n\n"
-                "Sources:\n"
-                "- Policy information was retrieved successfully"
-            )
+            return {
+                "answer": (
+                    "I retrieved the relevant policy "
+                    "information, but I wasn't able to "
+                    "generate a response right now."
+                ),
+                "retrieved_documents": retrieved_documents
+            }
 
         answer = response.text
 
+        # ----------------------------------------
+        # 11. Update conversation memory
+        # ----------------------------------------
+
         if memory is not None:
-                memory.add_turn(
+
+            memory.add_turn(
                 user_message=query,
                 assistant_message=answer
             )
 
-        return answer
+        # ----------------------------------------
+        # 12. Return answer + actual sources
+        # ----------------------------------------
 
-    except Exception:
+        return {
+            "answer": answer,
+            "retrieved_documents": retrieved_documents
+        }
 
-        return (
-            "Answer:\n"
-            "I found the relevant airport policy, but I couldn't "
-            "generate the final response right now. I don't want "
-            "to guess or provide unsupported information.\n\n"
-            "Please try again in a moment, or ask another airport "
-            "operations question.\n\n"
-            "Sources:\n"
-            "- Policy information was retrieved successfully"
-        )
+    except Exception as e:
+
+        return {
+            "answer": (
+                "I retrieved the relevant airport policy, "
+                "but I couldn't generate the final response "
+                "right now. I don't want to guess or provide "
+                "unsupported information."
+            ),
+            "retrieved_documents": retrieved_documents,
+            "error": str(e)
+        }
